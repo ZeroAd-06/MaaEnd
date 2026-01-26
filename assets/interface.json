@@ -26,7 +26,7 @@
         },
         {
             "name": "Win32-Window",
-            "label": "电脑端（窗口）",
+            "label": "电脑端（备选-窗口）",
             "type": "Win32",
             "win32": {
                 "class_regex": "UnityWndClass",
@@ -39,7 +39,7 @@
         },
         {
             "name": "Win32-Front",
-            "label": "电脑端（前台）",
+            "label": "电脑端（备选-前台）",
             "type": "Win32",
             "win32": {
                 "class_regex": "UnityWndClass",
