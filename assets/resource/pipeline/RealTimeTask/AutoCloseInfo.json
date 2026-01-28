@@ -21,9 +21,7 @@
         },
         "inverse": true,
         "next": [
-            "ClickAnywhereToContinue"
-        ],
-        "on_error": [
+            "ClickAnywhereToContinue",
             "RealTimeTaskMain"
         ]
     },
@@ -35,8 +33,7 @@
                 "expected": [
                     "点击任意处继续",
                     "点击任意处",
-                    "任意处继续",
-                    "任意处"
+                    "任意处继续"
                 ],
                 "roi": [
                     50,
@@ -60,11 +57,8 @@
         "focus": {
             "Node.Action.Succeeded": "跳过点击任意处继续"
         },
-        "post_wait_freezes": 100,
+        "post_wait_freezes": 80,
         "next": [
-            "RealTimeTaskMain"
-        ],
-        "on_error": [
             "RealTimeTaskMain"
         ]
     },
@@ -105,9 +99,6 @@
         },
         "next": [
             "SafeCloseButton"
-        ],
-        "on_error": [
-            "RealTimeTaskMain"
         ]
     },
     "SafeCloseButton": {
@@ -127,9 +118,6 @@
         },
         "post_wait_freezes": 100,
         "next": [
-            "RealTimeTaskMain"
-        ],
-        "on_error": [
             "RealTimeTaskMain"
         ]
     },
@@ -160,9 +148,6 @@
         "next": [
             "HandleTutorialConfirm",
             "RealTimeTaskMain"
-        ],
-        "on_error": [
-            "RealTimeTaskMain"
         ]
     },
     // ========================================================
@@ -190,9 +175,6 @@
             "Node.Action.Succeeded": "点击说明书确认键"
         },
         "next": [
-            "RealTimeTaskMain"
-        ],
-        "on_error": [
             "RealTimeTaskMain"
         ]
     },
@@ -232,9 +214,6 @@
         "post_wait_freezes": 200,
         "next": [
             "RealTimeTaskMain"
-        ],
-        "on_error": [
-            "RealTimeTaskMain"
         ]
     },
     "HandleTutorialGuide_LeftUp": {
@@ -269,9 +248,6 @@
             "Node.Action.Succeeded": "点击引导箭头"
         },
         "next": [
-            "RealTimeTaskMain"
-        ],
-        "on_error": [
             "RealTimeTaskMain"
         ]
     }
