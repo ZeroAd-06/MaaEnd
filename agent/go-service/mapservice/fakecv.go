@@ -28,11 +28,21 @@ func EnsureRGBA(img image.Image) *image.RGBA {
 }
 
 // copySubImage 从源图像的指定矩形区域创建一个新的 RGBA 图像。
-// 生成的图像 Bounds() 从 (0,0) 开始。
 func copySubImage(src *image.RGBA, r image.Rectangle) *image.RGBA {
 	w, h := r.Dx(), r.Dy()
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	draw.Draw(dst, dst.Bounds(), src, r.Min, draw.Src)
+
+	srcStride := src.Stride
+	dstStride := dst.Stride
+	srcPix := src.Pix
+	dstPix := dst.Pix
+
+	srcBase := src.PixOffset(r.Min.X, r.Min.Y)
+
+	for y := 0; y < h; y++ {
+		copy(dstPix[y*dstStride:y*dstStride+w*4], srcPix[srcBase+y*srcStride:srcBase+y*srcStride+w*4])
+	}
+
 	return dst
 }
 
@@ -181,63 +191,6 @@ func ApplyMaskFastInto(src image.Image, dst *image.RGBA, mask *image.Alpha) {
 // 图像过滤/遮罩
 // ==========================================
 
-// maskIcons 过滤黄色和蓝色图标。
-func maskIcons(img *image.RGBA) {
-	bounds := img.Bounds()
-	width, height := bounds.Dx(), bounds.Dy()
-	pix := img.Pix
-	stride := img.Stride
-
-	// 色差阈值
-	const DiffThreshold = 40
-
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			offset := y*stride + x*4
-
-			// 跳过透明像素
-			if pix[offset+3] == 0 {
-				continue
-			}
-
-			r := int(pix[offset+0])
-			g := int(pix[offset+1])
-			b := int(pix[offset+2])
-
-			isYellow := false
-			isBlue := false
-
-			// 检查黄色 (High R, High G, Low B)
-			if r > 100 && g > 100 {
-				minRG := r
-				if g < minRG {
-					minRG = g
-				}
-
-				if (minRG - b) > DiffThreshold {
-					isYellow = true
-				}
-			}
-
-			// 检查蓝色 (High B, Low R, Low G)
-			if b > 100 {
-				maxRG := r
-				if g > maxRG {
-					maxRG = g
-				}
-
-				if (b - maxRG) > DiffThreshold {
-					isBlue = true
-				}
-			}
-
-			if isYellow || isBlue {
-				pix[offset+3] = 0 // 遮罩过滤
-			}
-		}
-	}
-}
-
 // ApplySpotlightEffect 通过透明化移除 Tier 地图中的暗区（空白）。
 func ApplySpotlightEffect(img *image.RGBA, threshold int) {
 	bounds := img.Bounds()
@@ -307,168 +260,213 @@ func ApplyVoidFilter(img *image.RGBA, threshold int) {
 // 模板匹配（核心算法）
 // ==========================================
 
-// pixelTask 定义了一个需要匹配的像素点
-type pixelTask struct {
-	offset  int // 相对于 (x,y) 起点的字节偏移量
-	r, g, b int
+type ProbePoint struct {
+	X, Y    int
+	R, G, B int
 }
 
-// compiledTemplate 存储扁平化后的模板
-type compiledTemplate struct {
-	pixels []pixelTask
-	width  int
-	height int
+type TemplateProbe struct {
+	Points []ProbePoint
+	Width  int
+	Height int
 }
 
-// abs 为无分支整数绝对值计算
-func abs(x int) int {
-	y := x >> 63
-	return (x ^ y) - y
+func NewTemplateProbe() *TemplateProbe {
+	return &TemplateProbe{
+		Points: make([]ProbePoint, 0, 4096),
+	}
 }
 
-// compileTemplate 将模板“扁平化”，移除所有透明像素，并预计算偏移量
-func compileTemplate(tpl *image.RGBA, imgStride int, step int, skipRows int, sampleRate int) *compiledTemplate {
-	bounds := tpl.Bounds()
+// UpdateFromMinimap
+// 1. mask
+// 2. maskIcons
+// 3. 存入Probe
+func (tp *TemplateProbe) UpdateFromMinimap(img *image.RGBA, mask *image.Alpha) {
+	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
-	tplStride := tpl.Stride
-	tplPix := tpl.Pix
+	tp.Width = w
+	tp.Height = h
 
-	estimatedPixels := (w * h) / 4
-	pixels := make([]pixelTask, 0, estimatedPixels)
+	tp.Points = tp.Points[:0]
 
-	rowStep := 1 + skipRows
-	counter := 0
+	pix := img.Pix
+	stride := img.Stride
 
-	for y := 0; y < h; y += rowStep {
-		tplRowOffset := y * tplStride
-		imgRowRelativeOffset := y * imgStride
+	maskPix := mask.Pix
+	maskStride := mask.Stride
+
+	const DiffThreshold = 40
+
+	for y := 0; y < h; y++ {
+		rowOffset := y * stride
+		maskOffset := y * maskStride
 
 		for x := 0; x < w; x++ {
-			if tplPix[tplRowOffset+x*4+3] == 0 {
+			if maskPix[maskOffset+x] == 0 {
 				continue
 			}
 
-			counter++
-			if counter%sampleRate != 0 {
+			offset := rowOffset + x*4
+			if pix[offset+3] == 0 {
 				continue
 			}
 
-			pixels = append(pixels, pixelTask{
-				offset: imgRowRelativeOffset + x*4,
-				r:      int(tplPix[tplRowOffset+x*4]),
-				g:      int(tplPix[tplRowOffset+x*4+1]),
-				b:      int(tplPix[tplRowOffset+x*4+2]),
+			r := int(pix[offset+0])
+			g := int(pix[offset+1])
+			b := int(pix[offset+2])
+
+			isIcon := false
+
+			if r > 100 && g > 100 {
+				minRG := r
+				if g < minRG {
+					minRG = g
+				}
+				if (minRG - b) > DiffThreshold {
+					isIcon = true
+				}
+			}
+			if !isIcon && b > 100 {
+				maxRG := r
+				if g > maxRG {
+					maxRG = g
+				}
+				if (b - maxRG) > DiffThreshold {
+					isIcon = true
+				}
+			}
+
+			if isIcon {
+				continue
+			}
+
+			tp.Points = append(tp.Points, ProbePoint{
+				X: x, Y: y,
+				R: r, G: g, B: b,
 			})
 		}
 	}
-
-	return &compiledTemplate{
-		pixels: pixels,
-		width:  w,
-		height: h,
-	}
 }
 
-func MatchTemplateRGBA(img *image.RGBA, tpl *image.RGBA, step int, skipRows int, sampleRate int) (bestX, bestY int, maxScore float64) {
+// MatchProbe 匹配
+// probeStep: 采样步进。1=全像素, 4=1/4像素
+func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, useConcurrency bool) (bestX, bestY int, maxScore float64) {
 	imgW, imgH := img.Bounds().Dx(), img.Bounds().Dy()
 
-	ct := compileTemplate(tpl, img.Stride, step, skipRows, sampleRate)
+	maxX := imgW - probe.Width
+	maxY := imgH - probe.Height
+	if maxX <= 0 || maxY <= 0 {
+		return 0, 0, 0
+	}
 
-	validPixels := len(ct.pixels)
+	imgPix := img.Pix
+	imgStride := img.Stride
+	points := probe.Points
+
+	validPixels := len(points) / probeStep
 	if validPixels == 0 {
 		return 0, 0, 0
 	}
 
-	maxX := imgW - ct.width
-	maxY := imgH - ct.height
-	imgPix := img.Pix
+	matchRect := func(startX, endX, startY, endY int) (int, int, int) {
+		localMinSAD := math.MaxInt64
+		localX, localY := 0, 0
 
-	if len(imgPix) > 0 {
-		_ = imgPix[len(imgPix)-1]
+		for y := startY; y < endY; y += step {
+			rowBase := y * imgStride
+			for x := startX; x < endX; x += step {
+				baseOffset := rowBase + x*4
+				currentSAD := 0
+
+				for i := 0; i < len(points); i += probeStep {
+					p := &points[i]
+
+					off := baseOffset + (p.Y * imgStride) + (p.X * 4)
+
+					if off < 0 || off+2 >= len(imgPix) {
+						continue
+					}
+
+					r := int(imgPix[off])
+					g := int(imgPix[off+1])
+					b := int(imgPix[off+2])
+
+					diffR := r - p.R
+					if diffR < 0 {
+						diffR = -diffR
+					}
+					diffG := g - p.G
+					if diffG < 0 {
+						diffG = -diffG
+					}
+					diffB := b - p.B
+					if diffB < 0 {
+						diffB = -diffB
+					}
+
+					currentSAD += diffR + diffG + diffB
+
+					if currentSAD > localMinSAD {
+						break
+					}
+				}
+
+				if currentSAD < localMinSAD {
+					localMinSAD = currentSAD
+					localX = x
+					localY = y
+				}
+			}
+		}
+		return localX, localY, localMinSAD
+	}
+
+	if !useConcurrency {
+		bx, by, sad := matchRect(0, maxX, 0, maxY)
+		return scoreFromSAD(sad, validPixels, bx, by)
 	}
 
 	var mutex sync.Mutex
-	globalBestSAD := math.MaxInt64
-	globalBestX, globalBestY := 0, 0
-
-	cx := maxX / 2
-	cy := maxY / 2
-
+	globalMinSAD := math.MaxInt64
+	globalX, globalY := 0, 0
 	numWorkers := 8
-	rowsPerWorker := (maxY/step + 1 + numWorkers - 1) / numWorkers
-
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
+	rowsPerWorker := (maxY/step + 1 + numWorkers - 1) / numWorkers
 
 	for i := 0; i < numWorkers; i++ {
 		startIdx := i * rowsPerWorker
 		endIdx := (i + 1) * rowsPerWorker
-
 		go func(sIdx, eIdx int) {
 			defer wg.Done()
-
-			localBestSAD := math.MaxInt64
-			localBestX, localBestY := 0, 0
-
 			yStart := sIdx * step
 			yEnd := eIdx * step
 			if yEnd > maxY {
 				yEnd = maxY + 1
 			}
-
-			for y := yStart; y < yEnd; y += step {
-				rowBaseOffset := y * img.Stride
-
-				for x := 0; x <= maxX; x += step {
-					if x == cx && y == cy {
-						continue
-					}
-
-					baseOffset := rowBaseOffset + x*4
-
-					var currentSAD int
-					for i := range ct.pixels {
-						p := &ct.pixels[i]
-						off := baseOffset + p.offset
-
-						r := int(imgPix[off])
-						g := int(imgPix[off+1])
-						b := int(imgPix[off+2])
-
-						currentSAD += abs(r - p.r)
-						currentSAD += abs(g - p.g)
-						currentSAD += abs(b - p.b)
-
-						if currentSAD > localBestSAD {
-							break
-						}
-					}
-
-					if currentSAD < localBestSAD {
-						localBestSAD = currentSAD
-						localBestX = x
-						localBestY = y
-					}
-				}
-			}
-
+			lx, ly, lSad := matchRect(0, maxX, yStart, yEnd)
 			mutex.Lock()
-			if localBestSAD < globalBestSAD {
-				globalBestSAD = localBestSAD
-				globalBestX = localBestX
-				globalBestY = localBestY
+			if lSad < globalMinSAD {
+				globalMinSAD = lSad
+				globalX = lx
+				globalY = ly
 			}
 			mutex.Unlock()
 		}(startIdx, endIdx)
 	}
-
 	wg.Wait()
 
-	avgDiff := float64(globalBestSAD) / float64(validPixels*3)
+	return scoreFromSAD(globalMinSAD, validPixels, globalX, globalY)
+}
+
+func scoreFromSAD(sad int, count int, x, y int) (int, int, float64) {
+	if count == 0 {
+		return 0, 0, 0
+	}
+	avgDiff := float64(sad) / float64(count*3)
 	score := 1.0 - (avgDiff / 255.0)
 	if score < 0 {
 		score = 0
 	}
-
-	return globalBestX, globalBestY, score
+	return x, y, score
 }

@@ -17,7 +17,7 @@ import (
 const (
 	MaxLostTrackingCount = 3
 	MinMatchScore        = 0.7
-	MobileSearchRadius   = 150.0
+	MobileSearchRadius   = 50.0
 )
 
 type MapLocator struct {
@@ -40,6 +40,9 @@ type MapLocator struct {
 	// Buffers
 	workBuffer   *image.RGBA // 用于遮罩处理的小地图
 	searchBuffer *image.RGBA // 用于搜索操作的复用缓冲区
+
+	// sharedProbe 复用Probe对象
+	sharedProbe *TemplateProbe
 }
 
 func NewMapLocator(zoneConfigs map[string]string, debug bool, debugDir string) (*MapLocator, error) {
@@ -52,6 +55,7 @@ func NewMapLocator(zoneConfigs map[string]string, debug bool, debugDir string) (
 		zones:        make(map[string]*image.RGBA),
 		debug:        debug,
 		lostTracking: MaxLostTrackingCount + 1, // 初始判定为丢失
+		sharedProbe:  NewTemplateProbe(),       // 初始化一次
 	}
 
 	for id, path := range zoneConfigs {
@@ -118,14 +122,17 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 		m.workBuffer = image.NewRGBA(image.Rect(0, 0, w, h))
 	}
 
-	// 应用遮罩
-	ApplyMaskFastInto(minimap, m.workBuffer, m.maskAlpha)
-	// 过滤 UI 图标
-	maskIcons(m.workBuffer)
-	maskedMinimap := m.workBuffer // 别名
+	// 复制 minimap 到 workBuffer
+	draw.Draw(m.workBuffer, m.workBuffer.Bounds(), minimap, bounds.Min, draw.Src)
+
+	// 单次遍历生成 Probe (遮罩+过滤)
+	m.sharedProbe.UpdateFromMinimap(m.workBuffer, m.maskAlpha)
 
 	now := time.Now()
 
+	// ---------------------------------------------------------
+	// 追踪模式 (Tracking Mode)
+	// ---------------------------------------------------------
 	if m.currentZoneID != "" && m.lastKnownPos != nil && m.lostTracking <= MaxLostTrackingCount {
 		zoneImg, ok := m.zones[m.currentZoneID]
 		if ok {
@@ -150,7 +157,9 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 				// Copy ROI
 				searchImg := m.copyToSearchBuffer(zoneImg, searchRect)
 
-				localX, localY, score := MatchTemplateRGBA(searchImg, maskedMinimap, 2, 0, 4)
+				// Step=2 (物理步进)
+				// ProbeStep=4 (采样步进，即只用 25% 的特征点)
+				localX, localY, score := MatchProbe(searchImg, m.sharedProbe, 2, 4, true)
 
 				if score > 0.85 {
 					finalX := searchRect.Min.X + localX
@@ -163,22 +172,25 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 						finalX-fineRadius, finalY-fineRadius,
 						finalX+w+fineRadius, finalY+h+fineRadius,
 					).Intersect(zoneImg.Bounds())
-					fineImg := copySubImage(zoneImg, fineROI)
-					fx, fy, fScore := MatchTemplateRGBA(fineImg, maskedMinimap, 1, 0, 1)
 
-					// 若微调更佳则使用之
-					resultX, resultY, resultScore := float64(finalX), float64(finalY), score
-					if fScore > score {
-						resultX = float64(fineROI.Min.X + fx)
-						resultY = float64(fineROI.Min.Y + fy)
-						resultScore = fScore
+					if fineROI.Dx() >= w {
+						fineImg := copySubImage(zoneImg, fineROI)
+						// Step=1 (步进)
+						// ProbeStep=1 (全采样)
+						fx, fy, fScore := MatchProbe(fineImg, m.sharedProbe, 1, 1, false)
+
+						if fScore >= score {
+							finalX = fineROI.Min.X + fx
+							finalY = fineROI.Min.Y + fy
+							score = fScore
+						}
 					}
 
 					pos := &MapPosition{
 						ZoneID: m.currentZoneID,
-						X:      resultX + float64(w)/2,
-						Y:      resultY + float64(h)/2,
-						Score:  resultScore,
+						X:      float64(finalX) + float64(w)/2,
+						Y:      float64(finalY) + float64(h)/2,
+						Score:  score,
 					}
 
 					// 更新状态并立即返回
@@ -193,7 +205,9 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 		}
 	}
 
-	// --- 步骤 2：全局竞速（回退） ---
+	// ---------------------------------------------------------
+	// 全局搜索 (Global Search)
+	// ---------------------------------------------------------
 	// 仅在追踪失败或分数低时运行
 
 	type raceResult struct {
@@ -205,16 +219,16 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 	resultsCh := make(chan raceResult, len(m.zones))
 	var wg sync.WaitGroup
 
-	// Global Params: Step=4, Skip=2, SampleRate=20
+	// Global Params: Step=4, ProbeStep=20
+	// ProbeStep=20 意味着只采样 5% 的点，极快
 	coarseStep := 4
-	coarseSkip := 2
-	coarseSampleRate := 20
+	coarseProbeStep := 20
 
 	for zID, zImg := range m.zones {
 		wg.Add(1)
 		go func(id string, img *image.RGBA) {
 			defer wg.Done()
-			bx, by, score := MatchTemplateRGBA(img, maskedMinimap, coarseStep, coarseSkip, coarseSampleRate)
+			bx, by, score := MatchProbe(img, m.sharedProbe, coarseStep, coarseProbeStep, false)
 			resultsCh <- raceResult{ZoneID: id, X: bx, Y: by, Score: score}
 		}(zID, zImg)
 	}
@@ -245,8 +259,8 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 		).Intersect(winnerZone.Bounds())
 
 		fineImg := copySubImage(winnerZone, fineROI)
-		// Fine Search: Step=1, SampleRate=1
-		localX, localY, fineScore := MatchTemplateRGBA(fineImg, maskedMinimap, 1, 0, 1)
+		// Fine Search: Step=1, ProbeStep=1
+		localX, localY, fineScore := MatchProbe(fineImg, m.sharedProbe, 1, 1, false)
 
 		if fineScore > MinMatchScore {
 			finalX := fineROI.Min.X + localX
