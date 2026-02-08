@@ -258,7 +258,6 @@
     ]
   },
   "连携技": {
-    "post_delay": 100,
     "doc": "连携技",
     "recognition": {
       "type": "OCR",
@@ -379,95 +378,24 @@
     "post_delay": 1200,
     "timeout": 10000,
     "focus": {
-      "Node.Recognition.Succeeded": "task_id"
+      "Node.Recognition.Starting": "开始战技匹配",
+      "Node.Recognition.Succeeded": "成功识别战技",
+      "Node.Recognition.Failed": "未能识别战技",
+      "Node.Action.Starting": "开始执行战技操作",
+      "Node.Action.Succeeded": "成功执行战技操作",
+      "Node.Action.Failed": "未能执行战技操作"
     },
-    "pre_delay": 400,
     "doc": "外部战技匹配",
-    "recognition": {
-      "type": "Custom",
-      "param": {
-        "custom_recognition": "DynamicMatchRecognition",
-        "custom_recognition_param": {
-          "top_roi": [
-            617,
-            49,
-            45,
-            66
-          ],
-          "bottom_rois": [
-            [
-              1228,
-              628,
-              32,
-              31
-            ],
-            [
-              1164,
-              626,
-              32,
-              34
-            ],
-            [
-              1105,
-              631,
-              24,
-              26
-            ],
-            [
-              1042,
-              631,
-              24,
-              26
-            ]
-          ],
-          "key_rois": [
-            [
-              1235,
-              672,
-              16,
-              15
-            ],
-            [
-              1172,
-              673,
-              15,
-              14
-            ],
-            [
-              1107,
-              672,
-              17,
-              16
-            ],
-            [
-              1043,
-              672,
-              17,
-              16
-            ]
-          ],
-          "skill_roi": [
-            626,
-            59,
-            28,
-            26
-          ],
-          "threshold": 0.8
-        },
-        "roi": [
-          617,
-          49,
-          45,
-          66
-        ]
-      }
-    },
-    "action": {
-      "type": "Custom",
-      "param": {
-        "custom_action": "DynamicMatchAction"
-      }
-    },
+    "recognition": "Custom",
+    "custom_recognition": "DynamicMatchRecognition",
+    "roi": [
+      617,
+      49,
+      45,
+      66
+    ],
+    "action": "Custom",
+    "custom_action": "DynamicMatchAction",
     "$__mpe_code": {
       "position": {
         "x": 4717,
@@ -767,80 +695,73 @@
     ]
   },
   "终结技匹配": {
-    "timeout": 20000,
-    "recognition": {
-      "type": "Custom",
-      "param": {
-        "custom_recognition": "UltimateSkillRecognition",
-        "custom_recognition_param": {
-          "top_roi": [
-            617,
-            49,
-            45,
-            66
-          ],
-          "ult_rois": [
-            [
-              1231,
-              583,
-              20,
-              22
-            ],
-            [
-              1169,
-              583,
-              20,
-              22
-            ],
-            [
-              1107,
-              583,
-              20,
-              22
-            ],
-            [
-              1045,
-              583,
-              20,
-              22
-            ]
-          ],
-          "key_rois": [
-            [
-              1235,
-              672,
-              16,
-              16
-            ],
-            [
-              1171,
-              672,
-              17,
-              16
-            ],
-            [
-              1107,
-              672,
-              17,
-              16
-            ],
-            [
-              1043,
-              672,
-              17,
-              16
-            ]
-          ],
-          "threshold": 60
-        }
-      }
+    "timeout": 25000,
+    "post_delay": 500,
+    "recognition": "Custom",
+    "custom_recognition": "UltimateSkillRecognition",
+    "custom_recognition_param": {
+      "top_roi": [
+        617,
+        49,
+        45,
+        66
+      ],
+      "ult_rois": [
+        [
+          1231,
+          583,
+          20,
+          22
+        ],
+        [
+          1169,
+          583,
+          20,
+          22
+        ],
+        [
+          1107,
+          583,
+          20,
+          22
+        ],
+        [
+          1045,
+          583,
+          20,
+          22
+        ]
+      ],
+      "key_rois": [
+        [
+          1235,
+          672,
+          16,
+          16
+        ],
+        [
+          1171,
+          672,
+          17,
+          16
+        ],
+        [
+          1107,
+          672,
+          17,
+          16
+        ],
+        [
+          1043,
+          672,
+          17,
+          16
+        ]
+      ],
+      "threshold": 0.5
     },
-    "action": {
-      "type": "Custom",
-      "param": {
-        "custom_action": "UltimateSkillAction"
-      }
-    },
+    "action": "Custom",
+    "custom_action": "UltimateSkillAction",
     "$__mpe_code": {
       "position": {
         "x": 5081,
@@ -927,6 +848,7 @@
   "点击第一个": {
     "recognition": {
       "type": "ColorMatch",
+      "pre_delay": 3000,
       "param": {
         "lower": [
           [
@@ -1004,9 +926,9 @@
     },
     "next": [
       "识别确定1",
+      "连携技",
       "识别右箭头",
       "战技检测节点",
-      "连携技",
       "重击",
       "终结技",
       "识别进入获得奖励界面"
@@ -1020,7 +942,7 @@
       }
     },
     "next": [
-      "前进4"
+      "中间节点4"
     ]
   },
   "前进4": {
@@ -1095,6 +1017,7 @@
     }
   },
   "战技检测节点": {
+    "pre_delay": 300,
     "doc": "战技",
     "recognition": {
       "type": "OCR",

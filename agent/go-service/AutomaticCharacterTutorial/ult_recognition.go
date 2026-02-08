@@ -2,12 +2,14 @@ package AutomaticCharacterTutorial
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
+	"image/color"
 	"image/png"
-	"math"
 	"os"
+	"path/filepath"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/MaaXYZ/maa-framework-go/v3"
 	"github.com/rs/zerolog/log"
@@ -19,21 +21,37 @@ type UltimateSkillRecognition struct{}
 
 // Run implements the custom recognition logic
 func (r *UltimateSkillRecognition) Run(ctx *maa.Context, arg *maa.CustomRecognitionArg) (*maa.CustomRecognitionResult, bool) {
-	// 1. Parse parameters
-	var params struct {
-		TopROI    []int   `json:"top_roi"`   // [x, y, w, h] 顶部提示图标区域（白色箭头/图标）
-		UltROIs   [][]int `json:"ult_rois"`  // [[x, y, w, h], ...] 下方终结技图标区域列表
-		KeyROIs   [][]int `json:"key_rois"`  // [[x, y, w, h], ...] 对应的数字按键区域
-		Threshold float64 `json:"threshold"` // 匹配阈值 (0-255)
-	}
-	if err := json.Unmarshal([]byte(arg.CustomRecognitionParam), &params); err != nil {
-		log.Error().Err(err).Msg("Failed to parse params for UltimateSkillRecognition")
-		return nil, false
-	}
-
-	// Default threshold for image comparison
-	if params.Threshold == 0 {
-		params.Threshold = 60.0
+	// 1. Define parameters (Hardcoded as per request)
+	params := struct {
+		TopROI    []int
+		SkillROI  []int // New precise ROI for ultimate icon
+		UltROIs   [][]int
+		KeyROIs   [][]int
+		Threshold float64
+	}{
+		TopROI:   []int{617, 49, 45, 66},
+		SkillROI: []int{626, 57, 28, 28}, // Precise ROI for icon content
+		UltROIs: [][]int{
+			// Adjusted ROIs:
+			// Original small size: ~20x22.
+			// We expanded them to 80x80 before, which might be too big if noise is present.
+			// Let's reduce to 40x40 centered on the original points.
+			// 0: Center (1241, 594) -> {1221, 574, 40, 40}
+			{1221, 574, 40, 40},
+			// 1: Center (1179, 594) -> {1159, 574, 40, 40}
+			{1159, 574, 40, 40},
+			// 2: Center (1117, 594) -> {1097, 574, 40, 40}
+			{1097, 574, 40, 40},
+			// 3: Center (1055, 594) -> {1035, 574, 40, 40}
+			{1035, 574, 40, 40},
+		},
+		KeyROIs: [][]int{
+			{1233, 670, 20, 20},
+			{1169, 670, 20, 20},
+			{1105, 670, 20, 20},
+			{1041, 670, 21, 20},
+		},
+		Threshold: 0.1, //0.1测试
 	}
 
 	img := arg.Img
@@ -51,54 +69,142 @@ func (r *UltimateSkillRecognition) Run(ctx *maa.Context, arg *maa.CustomRecognit
 		return nil, false
 	}
 
-	// 2. Crop Top Indicator Image
-	if len(params.TopROI) < 4 {
-		log.Error().Msg("Invalid TopROI for Ultimate")
-		return nil, false
-	}
-	topRect := image.Rect(params.TopROI[0], params.TopROI[1], params.TopROI[0]+params.TopROI[2], params.TopROI[1]+params.TopROI[3])
-	if !topRect.In(img.Bounds()) {
-		topRect = topRect.Intersect(img.Bounds())
-	}
-	if topRect.Empty() {
-		return nil, false
-	}
-	topImg := subImager.SubImage(topRect)
+	// Simple Box-Sampling Resize function (Better for downscaling)
+	resizeImg := func(src image.Image, newW, newH int) image.Image {
+		dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+		bounds := src.Bounds()
+		srcW := bounds.Dx()
+		srcH := bounds.Dy()
 
-	bestIdx := -1
-	minDiff := math.MaxFloat64
+		xRatio := float64(srcW) / float64(newW)
+		yRatio := float64(srcH) / float64(newH)
 
-	// 3. Compare with Bottom Ult Icons
-	// 使用系统临时目录
-	tempFile, err := os.CreateTemp("", "maa_ult_template_*.png")
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to create temp ult template file")
-		return nil, false
+		for y := 0; y < newH; y++ {
+			for x := 0; x < newW; x++ {
+				// Average pixel values in the source rectangle
+				var r, g, b, a, count uint64
+				srcStartX := int(float64(x) * xRatio)
+				srcStartY := int(float64(y) * yRatio)
+				srcEndX := int(float64(x+1) * xRatio)
+				srcEndY := int(float64(y+1) * yRatio)
+
+				// Clamp
+				if srcEndX > srcW {
+					srcEndX = srcW
+				}
+				if srcEndY > srcH {
+					srcEndY = srcH
+				}
+
+				// If ratios are small (upscaling or small downscaling), ensure at least one pixel is read
+				if srcEndX <= srcStartX {
+					srcEndX = srcStartX + 1
+				}
+				if srcEndY <= srcStartY {
+					srcEndY = srcStartY + 1
+				}
+
+				for sy := srcStartY; sy < srcEndY; sy++ {
+					for sx := srcStartX; sx < srcEndX; sx++ {
+						pr, pg, pb, pa := src.At(bounds.Min.X+sx, bounds.Min.Y+sy).RGBA()
+						r += uint64(pr)
+						g += uint64(pg)
+						b += uint64(pb)
+						a += uint64(pa)
+						count++
+					}
+				}
+
+				if count > 0 {
+					dst.Set(x, y, color.RGBA64{
+						R: uint16(r / count),
+						G: uint16(g / count),
+						B: uint16(b / count),
+						A: uint16(a / count),
+					})
+				}
+			}
+		}
+		return dst
 	}
-	tempTemplatePath := tempFile.Name()
 
-	if err := png.Encode(tempFile, topImg); err != nil {
-		tempFile.Close()
-		os.Remove(tempTemplatePath)
-		log.Error().Err(err).Msg("Failed to encode temp ult template image")
-		return nil, false
-	}
-	tempFile.Close()
-	defer os.Remove(tempTemplatePath)
-
-	// 遍历所有终结技小图标区域，与顶部提示图标进行对比
-	for i, roi := range params.UltROIs {
+	// 2. Prepare Template from SkillROI (More precise than TopROI)
+	// Function to crop, RESIZE and save template to a file in resource/image directory
+	createTempTemplate := func(roi []int) (string, string, error) {
 		if len(roi) < 4 {
+			return "", "", os.ErrInvalid
+		}
+		rect := image.Rect(roi[0], roi[1], roi[0]+roi[2], roi[1]+roi[3])
+		if !rect.In(img.Bounds()) {
+			rect = rect.Intersect(img.Bounds())
+		}
+		if rect.Empty() {
+			return "", "", os.ErrInvalid
+		}
+
+		cropImg := subImager.SubImage(rect)
+
+		// RESIZE: Scale down the 28x28 skill icon.
+		// Previous attempt 20x20 might be too small.
+		// Let's try 24x24 as well to be consistent with recognition.go
+		resizedImg := resizeImg(cropImg, 24, 24)
+
+		// Use a relative path within resource/image
+		relDir := "AutomaticCharacterTutorial"
+		// Use unique filename to avoid caching issues
+		fileName := fmt.Sprintf("ultimate_template_%d.png", time.Now().UnixNano())
+		relPath := relDir + "/" + fileName
+
+		// Full path for writing the file
+		absDir := filepath.Join("resource", "image", relDir)
+		if err := os.MkdirAll(absDir, 0755); err != nil {
+			return "", "", err
+		}
+
+		fullPath := filepath.Join(absDir, fileName)
+		f, err := os.Create(fullPath)
+		if err != nil {
+			return "", "", err
+		}
+		defer f.Close()
+
+		if err := png.Encode(f, resizedImg); err != nil {
+			return "", "", err
+		}
+
+		return relPath, fullPath, nil
+	}
+
+	// Try to get template from SkillROI (Primary) or TopROI (Fallback)
+	log.Debug().Ints("SkillROI", params.SkillROI).Msg("Capturing ultimate template from SkillROI")
+	templatePath, fullTemplatePath, err := createTempTemplate(params.SkillROI)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to create ultimate template from SkillROI, trying TopROI")
+		templatePath, fullTemplatePath, err = createTempTemplate(params.TopROI)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to create ultimate template")
+			return nil, false
+		}
+	}
+	// Clean up the template file after recognition is done
+	defer os.Remove(fullTemplatePath)
+
+	// 3. Match Template against UltROIs
+	bestIdx := -1
+	maxScore := -1.0
+
+	for i, ultROI := range params.UltROIs {
+		if len(ultROI) < 4 {
 			continue
 		}
 
-		taskName := "UltMatch_Temp_" + strconv.Itoa(i)
+		taskName := "UltMatch_" + strconv.Itoa(i)
 		tmParam := map[string]any{
 			taskName: map[string]any{
 				"recognition": "TemplateMatch",
-				"template":    tempTemplatePath,
-				"threshold":   0.7,
-				"roi":         roi,
+				"template":    templatePath,
+				"threshold":   params.Threshold,
+				"roi":         ultROI,
 				"method":      5, // TM_CCOEFF_NORMED
 			},
 		}
@@ -106,100 +212,117 @@ func (r *UltimateSkillRecognition) Run(ctx *maa.Context, arg *maa.CustomRecognit
 		res := ctx.RunRecognition(taskName, img, tmParam)
 
 		var score float64
-		if res != nil && res.Hit {
+		if res != nil {
 			var detail struct {
-				Best struct {
+				All []struct {
+					Score float64 `json:"score"`
+				} `json:"all"`
+				Best *struct {
 					Score float64 `json:"score"`
 				} `json:"best"`
 			}
+
 			if err := json.Unmarshal([]byte(res.DetailJson), &detail); err == nil {
-				score = detail.Best.Score
-			}
-		} else {
-			if res == nil {
-				log.Warn().Str("task", taskName).Msg("RunRecognition returned nil for Ult")
+				// 优先读取 Best
+				if detail.Best != nil {
+					score = detail.Best.Score
+				} else if len(detail.All) > 0 {
+					// 如果 Best 为空 (Hit=false)，尝试从 All 中找最大值
+					for _, item := range detail.All {
+						if item.Score > score {
+							score = item.Score
+						}
+					}
+				}
 			}
 		}
 
-		log.Debug().Int("index", i).Float64("score", score).Msg("Ult TemplateMatch score")
+		log.Debug().Int("index", i).Float64("score", score).Msg("Ult template match result")
 
-		if score > 0 && (bestIdx == -1 || score > minDiff) {
-			minDiff = score
+		if score > maxScore {
+			maxScore = score
 			bestIdx = i
 		}
 	}
 
-	if minDiff < 0.7 {
-		bestIdx = -1
+	// Check if the best match is good enough
+	if maxScore < params.Threshold {
+		log.Info().Float64("maxScore", maxScore).Msg("No matching ultimate icon found")
+		return nil, false
 	}
 
-	log.Info().Int("activeIdx", bestIdx).Float64("maxScore", minDiff).Msg("Ultimate skill match result")
+	log.Info().Int("bestIdx", bestIdx).Float64("score", maxScore).Msg("Ultimate matched")
 
-	// 4. If match found within threshold
-	if bestIdx != -1 {
-		matchedROI := params.UltROIs[bestIdx]
-		box := maa.Rect{matchedROI[0], matchedROI[1], matchedROI[2], matchedROI[3]}
+	// 4. Identify Key Number using Template Match (1.png - 4.png)
+	keyNum := -1
+	if bestIdx >= 0 && bestIdx < len(params.KeyROIs) {
+		baseKeyROI := params.KeyROIs[bestIdx]
+		searchROI := []int{
+			baseKeyROI[0] - 10,
+			baseKeyROI[1] - 10,
+			baseKeyROI[2] + 20,
+			baseKeyROI[3] + 20,
+		}
 
-		keyNum := -1
+		bestKeyScore := -1.0
 
-		// Try OCR first
-		if bestIdx < len(params.KeyROIs) {
-			keyROI := params.KeyROIs[bestIdx]
-			if len(keyROI) >= 4 {
-				ocrParam := map[string]any{
-					"OCR_Ult_Key": map[string]any{
-						"recognition": "OCR",
-						"expected":    []string{"1", "2", "3", "4"},
-						"roi":         keyROI,
-					},
+		for k := 1; k <= 4; k++ {
+			templateName := "AutomaticCharacterTutorial/" + strconv.Itoa(k) + ".png"
+			taskName := "UltMatchKey_" + strconv.Itoa(k)
+
+			tmParam := map[string]any{
+				taskName: map[string]any{
+					"recognition": "TemplateMatch",
+					"template":    templateName,
+					"threshold":   0.6,
+					"roi":         searchROI,
+					"method":      5,
+				},
+			}
+
+			res := ctx.RunRecognition(taskName, img, tmParam)
+			if res != nil && res.Hit {
+				var detail struct {
+					Best struct {
+						Score float64 `json:"score"`
+					} `json:"best"`
+				}
+				score := 0.0
+				if err := json.Unmarshal([]byte(res.DetailJson), &detail); err == nil {
+					score = detail.Best.Score
 				}
 
-				ocrRes := ctx.RunRecognition("OCR_Ult_Key", img, ocrParam)
-				if ocrRes != nil && ocrRes.Hit {
-					var ocrDetail struct {
-						Text string `json:"text"`
-						Best struct {
-							Text string `json:"text"`
-						} `json:"best"`
-					}
-					if err := json.Unmarshal([]byte(ocrRes.DetailJson), &ocrDetail); err == nil {
-						text := ocrDetail.Text
-						if text == "" {
-							text = ocrDetail.Best.Text
-						}
-						text = strings.TrimSpace(text)
-						if val, err := strconv.Atoi(text); err == nil {
-							keyNum = val
-						} else {
-							for _, r := range text {
-								if r >= '0' && r <= '9' {
-									keyNum = int(r - '0')
-									break
-								}
-							}
-						}
-					}
+				log.Debug().Int("key", k).Float64("score", score).Msg("Ult Key number match result")
+
+				if score > bestKeyScore {
+					bestKeyScore = score
+					keyNum = k
 				}
 			}
 		}
 
-		// Fallback: Check if the top image itself contains a number (as mentioned by user)
-		// If OCR failed, maybe we can assume the index maps to key (0->1, 1->2...)
-		// BUT the user said the number 1 appears ABOVE the icon.
-		// Since we matched the icon successfully, we know WHICH character it is (bestIdx).
-		// The key binding usually follows the character slot position (Index 0 is usually Key 1).
-		// So if OCR fails, falling back to index+1 is a safe bet for standard key bindings.
-
-		detailBytes, _ := json.Marshal(map[string]any{
-			"index":   bestIdx,
-			"key_num": keyNum,
-		})
-
-		return &maa.CustomRecognitionResult{
-			Box:    box,
-			Detail: string(detailBytes),
-		}, true
+		if bestKeyScore < 0.5 {
+			log.Warn().Float64("score", bestKeyScore).Msg("Ult Key number match score too low")
+		}
 	}
 
-	return nil, false
+	// 5. Return Result
+	detailBytes, _ := json.Marshal(map[string]any{
+		"index":   bestIdx,
+		"score":   maxScore,
+		"key_num": keyNum,
+	})
+
+	box := maa.Rect{}
+	if bestIdx >= 0 && bestIdx < len(params.UltROIs) {
+		r := params.UltROIs[bestIdx]
+		if len(r) >= 4 {
+			box = maa.Rect{r[0], r[1], r[2], r[3]}
+		}
+	}
+
+	return &maa.CustomRecognitionResult{
+		Box:    box,
+		Detail: string(detailBytes),
+	}, true
 }
