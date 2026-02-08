@@ -109,6 +109,10 @@
         "tasks/BakerEntry.json",
         "tasks/SimpleProductionBatchStart.json",
         "tasks/PCOpenGame.json",
-        "tasks/AndroidOpenGame.json"
+        "tasks/AndroidOpenGame.json",
+        "tasks/GoTo/GoToHome.json",
+        "tasks/GoTo/GoToRegionalDevelopment.json",
+        "tasks/GoTo/GoToAcquisitionCenter.json",
+        "tasks/GoTo/GoToOperationalManual.json"
     ]
 }

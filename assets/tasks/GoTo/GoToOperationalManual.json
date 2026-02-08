@@ -1,0 +1,16 @@
+{
+    "task": [
+        {
+            "name": "GoToOperationalManual",
+            "label": "GoToOperationalManual",
+            "entry": "OperationalManual",
+            "description": "GoToOperationalManual",
+            "controller": [
+                "Win32",
+                "Win32-Front",
+                "Win32-Window"
+            ]
+        }
+    ],
+    "option": {}
+}
