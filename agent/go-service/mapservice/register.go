@@ -38,12 +38,10 @@ func Register() {
 }
 
 type MapLocateAction struct {
-	debug     bool
 	outputDir string
 }
 
 type MapLocateActionParam struct {
-	Debug     bool   `json:"debug"`
 	OutputDir string `json:"output_dir"`
 }
 
@@ -60,7 +58,7 @@ func (a *MapLocateAction) Run(ctx *maa.Context, arg *maa.CustomActionArg) bool {
 		}
 	}
 
-	locator, err := getLocator(p.Debug, p.OutputDir)
+	locator, err := getLocator()
 	if err != nil {
 		log.Error().Err(err).Msg("failed to get locator")
 		return false
@@ -114,13 +112,13 @@ func (a *MapLocateAction) Run(ctx *maa.Context, arg *maa.CustomActionArg) bool {
 			Str("zone", pos.ZoneID).
 			Float64("x", pos.X).
 			Float64("y", pos.Y).
-			Float64("score", pos.Score).
+			Float64("avgDiff", pos.AvgDiff).
 			Int("slice", pos.SliceIndex).
 			Int64("latency", latency).
 			Msg("[MapLocate] Position Found")
 
 		// [Debug] Result in MXU for testing
-		msg := fmt.Sprintf("Located: zone=%s x=%.2f y=%.2f score=%.2f latency=%dms", pos.ZoneID, pos.X, pos.Y, pos.Score, latency)
+		msg := fmt.Sprintf("Located: zone=%s x=%.2f y=%.2f avgDiff=%.2f latency=%dms", pos.ZoneID, pos.X, pos.Y, pos.AvgDiff, latency)
 		MapShowMessage(ctx, msg)
 	} else {
 		log.Warn().Msg("[MapLocate] Position Not Found")
@@ -211,12 +209,11 @@ func AutoScanZones(rootDir string) (map[string]string, error) {
 	return zones, nil
 }
 
-func getLocator(debug bool, outputDir string) (*MapLocator, error) {
+func getLocator() (*MapLocator, error) {
 	locatorMutex.Lock()
 	defer locatorMutex.Unlock()
 
 	if globalLocator != nil {
-		globalLocator.debug = debug
 		return globalLocator, nil
 	}
 
@@ -234,7 +231,7 @@ func getLocator(debug bool, outputDir string) (*MapLocator, error) {
 		return nil, fmt.Errorf("no valid map resources found in %s", mapRoot)
 	}
 
-	loc, err := NewMapLocator(zones, debug, outputDir)
+	loc, err := NewMapLocator(zones)
 	if err != nil {
 		return nil, err
 	}

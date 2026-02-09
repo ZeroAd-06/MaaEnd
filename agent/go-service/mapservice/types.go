@@ -29,6 +29,6 @@ type MapPosition struct {
 	ZoneID     string  `json:"zone_id"`
 	X          float64 `json:"x"`
 	Y          float64 `json:"y"`
-	Score      float64 `json:"score"`
+	AvgDiff    float64 `json:"avg_diff"` // 越小越好
 	SliceIndex int     `json:"slice_index"`
 }

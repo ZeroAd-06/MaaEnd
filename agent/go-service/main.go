@@ -76,7 +76,7 @@ func main() {
 func registerAll() {
 	// Register all custom components from each package
 	realtime.Register()
-  mapservice.Register()
+	mapservice.Register()
 	importtask.Register()
 	resell.Register()
 	puzzle.Register()

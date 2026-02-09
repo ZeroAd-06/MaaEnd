@@ -6,6 +6,7 @@ import (
 	"image/draw"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,6 @@ const (
 
 type MapLocator struct {
 	basePath     string
-	debugDir     string
 	lastKnownPos *MapPosition
 	lostTracking int
 
@@ -35,7 +35,6 @@ type MapLocator struct {
 	lastTime  time.Time
 
 	maskAlpha *image.Alpha
-	debug     bool
 
 	// Buffers
 	workBuffer   *image.RGBA // 用于遮罩处理的小地图
@@ -45,15 +44,9 @@ type MapLocator struct {
 	sharedProbe *TemplateProbe
 }
 
-func NewMapLocator(zoneConfigs map[string]string, debug bool, debugDir string) (*MapLocator, error) {
-	if debugDir == "" {
-		debugDir = os.TempDir()
-	}
-
+func NewMapLocator(zoneConfigs map[string]string) (*MapLocator, error) {
 	loc := &MapLocator{
-		debugDir:     debugDir,
 		zones:        make(map[string]*image.RGBA),
-		debug:        debug,
 		lostTracking: MaxLostTrackingCount + 1, // 初始判定为丢失
 		sharedProbe:  NewTemplateProbe(),       // 初始化一次
 	}
@@ -159,9 +152,10 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 
 				// Step=2 (物理步进)
 				// ProbeStep=4 (采样步进，即只用 25% 的特征点)
-				localX, localY, score := MatchProbe(searchImg, m.sharedProbe, 2, 4, true)
+				localX, localY, coarseAvgDiff := MatchProbe(searchImg, m.sharedProbe, 2, 4, true)
 
-				if score > 0.85 {
+				const trackingMaxDiff = 50.0
+				if coarseAvgDiff < trackingMaxDiff {
 					finalX := searchRect.Min.X + localX
 					finalY := searchRect.Min.Y + localY
 
@@ -173,24 +167,27 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 						finalX+w+fineRadius, finalY+h+fineRadius,
 					).Intersect(zoneImg.Bounds())
 
+					finalAvgDiff := coarseAvgDiff
+
 					if fineROI.Dx() >= w {
 						fineImg := copySubImage(zoneImg, fineROI)
 						// Step=1 (步进)
 						// ProbeStep=1 (全采样)
-						fx, fy, fScore := MatchProbe(fineImg, m.sharedProbe, 1, 1, false)
+						fx, fy, fineAvgDiffResult := MatchProbe(fineImg, m.sharedProbe, 1, 1, false)
 
-						if fScore >= score {
+						// Fine search 如果更好，就用 fine 结果
+						if fineAvgDiffResult < finalAvgDiff {
 							finalX = fineROI.Min.X + fx
 							finalY = fineROI.Min.Y + fy
-							score = fScore
+							finalAvgDiff = fineAvgDiffResult
 						}
 					}
 
 					pos := &MapPosition{
-						ZoneID: m.currentZoneID,
-						X:      float64(finalX) + float64(w)/2,
-						Y:      float64(finalY) + float64(h)/2,
-						Score:  score,
+						ZoneID:  m.currentZoneID,
+						X:       float64(finalX) + float64(w)/2,
+						Y:       float64(finalY) + float64(h)/2,
+						AvgDiff: finalAvgDiff,
 					}
 
 					// 更新状态并立即返回
@@ -208,47 +205,78 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 	// ---------------------------------------------------------
 	// 全局搜索 (Global Search)
 	// ---------------------------------------------------------
-	// 仅在追踪失败或分数低时运行
 
 	type raceResult struct {
-		ZoneID string
-		X, Y   int
-		Score  float64
+		ZoneID  string
+		X, Y    int
+		AvgDiff float64
 	}
 
 	resultsCh := make(chan raceResult, len(m.zones))
 	var wg sync.WaitGroup
 
-	// Global Params: Step=4, ProbeStep=20
-	// ProbeStep=20 意味着只采样 5% 的点，极快
+	// Global Params: Step=4, ProbeStep=10
 	coarseStep := 4
-	coarseProbeStep := 20
+	coarseProbeStep := 10
 
 	for zID, zImg := range m.zones {
 		wg.Add(1)
 		go func(id string, img *image.RGBA) {
 			defer wg.Done()
-			bx, by, score := MatchProbe(img, m.sharedProbe, coarseStep, coarseProbeStep, false)
-			resultsCh <- raceResult{ZoneID: id, X: bx, Y: by, Score: score}
+			bx, by, avgDiff := MatchProbe(img, m.sharedProbe, coarseStep, coarseProbeStep, false)
+			resultsCh <- raceResult{ZoneID: id, X: bx, Y: by, AvgDiff: avgDiff}
 		}(zID, zImg)
 	}
 
 	wg.Wait()
 	close(resultsCh)
 
-	var winner raceResult
-	maxScore := -1.0
-
+	// 收集结果，过滤无效结果（AvgDiff=0 表示地图太小无法匹配）
+	allResults := []raceResult{}
 	for res := range resultsCh {
-		if res.Score > maxScore {
-			maxScore = res.Score
-			winner = res
+		if res.AvgDiff > 0 {
+			allResults = append(allResults, res)
+		}
+	}
+
+	// 按 AvgDiff 升序排序（越小越好）
+	sort.Slice(allResults, func(i, j int) bool {
+		return allResults[i].AvgDiff < allResults[j].AvgDiff
+	})
+
+	// 相对置信度判断
+	var winner raceResult
+	useWinner := false
+
+	if len(allResults) >= 2 {
+		rank1 := allResults[0]
+		rank2 := allResults[1]
+
+		// 绝对阈值
+		const maxAbsoluteDiff = 60.0
+		absoluteOK := rank1.AvgDiff < maxAbsoluteDiff
+
+		// 相对置信度
+		const minRelativeGap = 0.15
+		relativeGap := (rank2.AvgDiff - rank1.AvgDiff) / rank2.AvgDiff
+		relativeOK := relativeGap > minRelativeGap
+
+		// 组合判断
+		if absoluteOK && relativeOK {
+			winner = rank1
+			useWinner = true
+		}
+	} else if len(allResults) == 1 {
+		// 只有一个结果时降级为绝对阈值判断
+		if allResults[0].AvgDiff < 50.0 {
+			winner = allResults[0]
+			useWinner = true
 		}
 	}
 
 	var bestResult *MapPosition
 
-	if maxScore > 0.5 {
+	if useWinner {
 		// Refine Global Winner
 		winnerZone := m.zones[winner.ZoneID]
 		coarseX, coarseY := winner.X, winner.Y
@@ -260,19 +288,21 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 
 		fineImg := copySubImage(winnerZone, fineROI)
 		// Fine Search: Step=1, ProbeStep=1
-		localX, localY, fineScore := MatchProbe(fineImg, m.sharedProbe, 1, 1, false)
+		localX, localY, fineAvgDiff := MatchProbe(fineImg, m.sharedProbe, 1, 1, false)
 
-		if fineScore > MinMatchScore {
-			finalX := fineROI.Min.X + localX
-			finalY := fineROI.Min.Y + localY
-			cx := float64(finalX) + float64(w)/2
-			cy := float64(finalY) + float64(h)/2
+		// Fine search 不再检查固定阈值
+		finalX := fineROI.Min.X + localX
+		finalY := fineROI.Min.Y + localY
+		cx := float64(finalX) + float64(w)/2
+		cy := float64(finalY) + float64(h)/2
 
-			bestResult = &MapPosition{
-				ZoneID: winner.ZoneID,
-				X:      cx, Y: cy, Score: fineScore,
-			}
+		bestResult = &MapPosition{
+			ZoneID:  winner.ZoneID,
+			X:       cx,
+			Y:       cy,
+			AvgDiff: fineAvgDiff,
 		}
+
 	}
 
 	// Result
@@ -291,7 +321,8 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 		m.lostTracking = 0
 
 		log.Info().Str("zone", bestResult.ZoneID).
-			Float64("score", bestResult.Score).
+			Float64("x", bestResult.X).
+			Float64("y", bestResult.Y).
 			Msg("Global Match Resolved")
 
 		return bestResult, nil
@@ -333,10 +364,6 @@ func (m *MapLocator) copyToSearchBuffer(src *image.RGBA, r image.Rectangle) *ima
 
 	draw.Draw(m.searchBuffer, m.searchBuffer.Bounds(), src, r.Min, draw.Src)
 	return m.searchBuffer
-}
-
-func (m *MapLocator) saveDebugImage(name string, img image.Image) {
-	SaveDebugImage(m.debugDir, name, img)
 }
 
 func (m *MapLocator) GetLastKnownPos() *MapPosition {

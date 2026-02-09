@@ -348,9 +348,9 @@ func (tp *TemplateProbe) UpdateFromMinimap(img *image.RGBA, mask *image.Alpha) {
 	}
 }
 
-// MatchProbe 匹配
-// probeStep: 采样步进。1=全像素, 4=1/4像素
-func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, useConcurrency bool) (bestX, bestY int, maxScore float64) {
+// MatchProbe 匹配，返回最佳匹配位置和平均差异
+// step: 物理步进， probeStep: 采样步进
+func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, useConcurrency bool) (bestX, bestY int, avgDiff float64) {
 	imgW, imgH := img.Bounds().Dx(), img.Bounds().Dy()
 
 	maxX := imgW - probe.Width
@@ -390,6 +390,7 @@ func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, 
 			for x := startX; x < endX; x += step {
 				baseOffset := rowBase + x*4
 				currentSAD := 0
+				validCount := 0
 
 				for i := 0; i < len(points); i += probeStep {
 					p := &points[i]
@@ -399,6 +400,8 @@ func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, 
 					if off < 0 || off+2 >= len(imgPix) {
 						continue
 					}
+
+					validCount++
 
 					r := int(imgPix[off])
 					g := int(imgPix[off+1])
@@ -429,6 +432,13 @@ func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, 
 					}
 				}
 
+				// 边缘检查
+				minRequired := (len(points) * 85) / (probeStep * 100)
+				if validCount < minRequired {
+					currentSAD = math.MaxInt32
+					continue
+				}
+
 				if currentSAD < localMinSAD {
 					localMinSAD = currentSAD
 					localX = x
@@ -441,7 +451,7 @@ func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, 
 
 	if !useConcurrency {
 		bx, by, sad := matchRect(0, maxX, 0, maxY)
-		return scoreFromSAD(sad, validPixels, bx, by)
+		return bx, by, calcAvgDiff(sad, validPixels)
 	}
 
 	var mutex sync.Mutex
@@ -474,17 +484,13 @@ func MatchProbe(img *image.RGBA, probe *TemplateProbe, step int, probeStep int, 
 	}
 	wg.Wait()
 
-	return scoreFromSAD(globalMinSAD, validPixels, globalX, globalY)
+	return globalX, globalY, calcAvgDiff(globalMinSAD, validPixels)
 }
 
-func scoreFromSAD(sad int, count int, x, y int) (int, int, float64) {
+// calcAvgDiff 计算平均差异（越小越好）
+func calcAvgDiff(sad int, count int) float64 {
 	if count == 0 {
-		return 0, 0, 0
+		return 0
 	}
-	avgDiff := float64(sad) / float64(count*3)
-	score := 1.0 - (avgDiff / 255.0)
-	if score < 0 {
-		score = 0
-	}
-	return x, y, score
+	return float64(sad) / float64(count*3)
 }
