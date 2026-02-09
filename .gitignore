@@ -469,3 +469,6 @@ debug
 .com.apple.timemachine.donotpresent
 Network Trash Folder
 Temporary Items
+
+# python
+venv/
