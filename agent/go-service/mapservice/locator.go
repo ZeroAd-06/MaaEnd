@@ -210,15 +210,10 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 	type raceResult struct {
 		ZoneID        string
 		X, Y          int
-		AvgDiff       float64 // 原始平均差异
-		WeightedDiff  float64 // 边缘加权差异（策略1）
-		Consistency   float64 // 局部一致性（策略2）
-		HistDist      float64 // 直方图距离
+		WeightedDiff  float64 // 边缘加权差异
+		Consistency   float64 // 局部一致性
 		CombinedScore float64 // 最终组合分数
 	}
-
-	// Stage 1: 计算小地图的颜色直方图
-	probeHist := ComputeHistogramFromProbe(m.sharedProbe)
 
 	resultsCh := make(chan raceResult, len(m.zones))
 	var wg sync.WaitGroup
@@ -251,10 +246,6 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 			// 快速一致性检查（采样版本，只用1/4的点）
 			consistency := ComputeLocalConsistencyFast(img, m.sharedProbe, bx, by, 4)
 
-			// 直方图距离（仅用于日志，不参与评分）
-			histDist := 0.0
-			_ = probeHist // 暂时保留变量避免编译错误
-
 			// 组合评分
 			combinedScore := weightedDiff + consistency*consistencyAlpha
 
@@ -262,10 +253,8 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 				ZoneID:        id,
 				X:             bx,
 				Y:             by,
-				AvgDiff:       weightedDiff, // 直接用 weightedDiff 作为 avgDiff
 				WeightedDiff:  weightedDiff,
 				Consistency:   consistency,
-				HistDist:      histDist,
 				CombinedScore: combinedScore,
 			}
 		}(zID, zImg)
@@ -298,8 +287,6 @@ func (m *MapLocator) Locate(ctx *maa.Context, minimap image.Image) (*MapPosition
 			Float64("combined", res.CombinedScore).
 			Float64("weighted", res.WeightedDiff).
 			Float64("consistency", res.Consistency).
-			Float64("avgDiff", res.AvgDiff).
-			Float64("histDist", res.HistDist).
 			Int("x", res.X).
 			Int("y", res.Y).
 			Msg("[MapLocate] Global Search Rank")
