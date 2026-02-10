@@ -267,7 +267,7 @@
         },
         "next": [
             "SceneWaitLoadingExit",
-            "SceneNextTrue"
+            "ScenePrivateNextTrue"
         ]
     }
 }
