@@ -64,6 +64,30 @@ var Win32KeyEnum = map[string]int32{
 	"Show/HideProductIcons": 0x73, // F4
 }
 
+// GetKeyCode Transfer key string to key code.
+//
+// Params:
+//   - key: The key string, e.g. "Move_W", "Jump", "Attack", etc.
+//
+// Returns:
+//   - KeyCode(int32): The corresponding key code for the given key string if the key is supported.
+//   - -1: If the key string is unsupported.
+//   - -2: If the key string is invalid.
+func GetKeyCode(key string) int32 {
+	var keyCode, ok = Win32KeyEnum[key]
+	if !ok {
+		log.Error().Msgf("Invalid key: %s", key)
+		return -2
+	}
+	if keyCode == -1 {
+		log.Error().Msgf("Unsupported key: %s", key)
+	}
+
+	//log.Debug().Msgf("Posting KeyDown: %s (%d | 0x%X)", key, keyCode, keyCode)
+
+	return keyCode
+}
+
 // In order to avoid conflict with maafw, add _ for struct names.
 type _ClickKey struct{}
 
@@ -83,13 +107,10 @@ func (a *_ClickKey) Run(ctx *maa.Context, arg *maa.CustomActionArg) bool {
 		return false
 	}
 
-	var key, ok = Win32KeyEnum[params.Key]
-	if !ok {
-		log.Error().Msgf("Invalid key: %s", params.Key)
+	key := GetKeyCode(params.Key)
+	if key < 0 {
 		return false
 	}
-
-	log.Debug().Msgf("Posting ClickKey: %s (%d | 0x%X)", params.Key, key, key)
 
 	return ctx.GetTasker().GetController().PostClickKey(key).Wait().Done()
 }
@@ -105,13 +126,10 @@ func (a *_LongPressKey) Run(ctx *maa.Context, arg *maa.CustomActionArg) bool {
 		return false
 	}
 
-	var key, ok = Win32KeyEnum[params.Key]
-	if !ok {
-		log.Error().Msgf("Invalid key: %s", params.Key)
+	key := GetKeyCode(params.Key)
+	if key < 0 {
 		return false
 	}
-
-	log.Debug().Msgf("Posting LongPressKey: %s (%d | 0x%X) for %d ms", params.Key, key, key, params.Duration)
 
 	var ctrl = ctx.GetTasker().GetController()
 	if !ctrl.PostKeyDown(key).Wait().Done() {
@@ -133,13 +151,10 @@ func (a *_KeyDown) Run(ctx *maa.Context, arg *maa.CustomActionArg) bool {
 		return false
 	}
 
-	var key, ok = Win32KeyEnum[params.Key]
-	if !ok {
-		log.Error().Msgf("Invalid key: %s", params.Key)
+	key := GetKeyCode(params.Key)
+	if key < 0 {
 		return false
 	}
-
-	log.Debug().Msgf("Posting KeyDown: %s (%d | 0x%X)", params.Key, key, key)
 
 	return ctx.GetTasker().GetController().PostKeyDown(key).Wait().Done()
 }
@@ -154,13 +169,10 @@ func (a *_KeyUp) Run(ctx *maa.Context, arg *maa.CustomActionArg) bool {
 		return false
 	}
 
-	var key, ok = Win32KeyEnum[params.Key]
-	if !ok {
-		log.Error().Msgf("Invalid key: %s", params.Key)
+	key := GetKeyCode(params.Key)
+	if key < 0 {
 		return false
 	}
-
-	log.Debug().Msgf("Posting KeyUp: %s (%d | 0x%X)", params.Key, key, key)
 
 	return ctx.GetTasker().GetController().PostKeyUp(key).Wait().Done()
 }
