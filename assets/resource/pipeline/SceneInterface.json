@@ -95,13 +95,14 @@
             "ScenePrivateWorldEnterWorldDijiang"
         ]
     },
-    // "SceneEnterWorldValleyIVTheHub": {
-    //     "doc": "从任意界面进入四号谷地-枢纽区大世界",
-    //     "next": [
-    //         "[JumpBack]ScenePrivateAnyEnterWorld",
-    //         "ScenePrivateWorldEnterWorldValleyIVTheHub"
-    //     ]
-    // },
+    "SceneEnterWorldValleyIVTheHub": {
+        "max_hit": 1,
+        "doc": "从任意界面进入四号谷地-枢纽区大世界，一个task只能运行一次",
+        "next": [
+            "[JumpBack]ScenePrivateAnyEnterWorld",
+            "ScenePrivateWorldEnterWorldValleyIVTheHub"
+        ]
+    },
     "SceneEnterMenuRegionalDevelopment": {
         "doc": "从任意界面进入地区建设菜单",
         "recognition": {

@@ -44,5 +44,15 @@
             "[JumpBack]SceneEnterMenuRegionalDevelopment",
             "ScenePrivateNextTrue"
         ]
+    },
+    "SceneTestEnterWorldValleyIVTheHub": {
+        // 用例：在帝江号大世界开始任务，期望进入四号谷地-枢纽区大世界
+        // 用例：在武陵大世界开始任务，期望进入四号谷地-枢纽区大世界
+        // 用例：在谷地大世界开始任务，期望进入四号谷地-枢纽区大世界
+        "doc": "在任意场景下，进入四号谷地-枢纽区大世界",
+        "next": [
+            "[JumpBack]SceneEnterWorldValleyIVTheHub",
+            "ScenePrivateNextTrue"
+        ]
     }
 }

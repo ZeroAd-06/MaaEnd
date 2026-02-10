@@ -30,12 +30,5 @@
             "[JumpBack]SceneWaitLoadingExit",
             "ScenePrivateNextTrue"
         ]
-    },
-    "ScenePrivateWorldEnterWorldDijiang": {
-        "doc": "在大世界界面，进入帝江号大世界",
-        "next": [
-            "[JumpBack]ScenePrivateWorldEnterMapDijiang",
-            "ScenePrivateMapEnterTeleport"
-        ]
     }
 }
