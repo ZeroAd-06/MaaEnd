@@ -453,6 +453,8 @@
     "task.SimpleProductionBatch.error_not_found": "**簡易制作画面で制作するアイテムを選択してから、スクリプトを起動してください**",
     "task.AndroidOpenGame.label": "🎮 ゲーム起動（Android）",
     "task.AndroidOpenGame.description": "Androidでゲームを起動します。事前にエミュレーターを手動で起動してください。",
+    "task.SceneSetResolution1280x720.label": "🛠️ 解像度を 1280×720 に",
+    "task.SceneSetResolution1280x720.description": "ゲーム設定を開き、解像度を 1280×720 に切り替えます。長期的に 1280×720 で利用したい場合のみ手動実行してください。それ以外のウィンドウサイズもスクリーンショットスケーリングで動作します。",
     "task.SeizeEntrustTask.label": "🌆受注依頼",
     "task.SeizeEntrustTaskCommissionSource.label": "依頼荷受場所",
     "task.SeizeEntrustTaskCommissionSource.cases.WulingCity.label": "武陵城（11.9万）",

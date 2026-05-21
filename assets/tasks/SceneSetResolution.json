@@ -1,0 +1,18 @@
+{
+    "task": [
+        {
+            "name": "SceneSetResolution1280x720",
+            "label": "$task.SceneSetResolution1280x720.label",
+            "description": "$task.SceneSetResolution1280x720.description",
+            "entry": "SceneSetResolution1280x720",
+            "controller": [
+                "Win32-Window",
+                "Win32-Window-Background",
+                "Win32-Front"
+            ],
+            "group": [
+                "other_menu"
+            ]
+        }
+    ]
+}

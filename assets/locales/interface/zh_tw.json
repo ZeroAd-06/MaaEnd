@@ -457,6 +457,8 @@
     "task.SimpleProductionBatch.error_not_found": "**請先在簡易製作頁面中選擇要製作的道具，再啟動腳本**",
     "task.AndroidOpenGame.label": "🎮打開遊戲",
     "task.AndroidOpenGame.description": "安卓端打開遊戲，需先手動打開模擬器",
+    "task.SceneSetResolution1280x720.label": "🛠️ 調解析度為 1280×720",
+    "task.SceneSetResolution1280x720.description": "打開遊戲設定並把解析度切到 1280×720。僅供希望長期把遊戲保持在 1280×720 的使用者手動執行；非 1280×720 的視窗也能透過截圖縮放正常執行任務。",
     "task.SeizeEntrustTask.label": "🌆搶委託",
     "task.SeizeEntrustTaskCommissionSource.label": "委託接收點",
     "task.SeizeEntrustTaskCommissionSource.cases.WulingCity.label": "武陵城（11.9萬）",

@@ -1,0 +1,313 @@
+{
+    // 用户主动触发的"切换游戏内分辨率"流程
+    // 入口: SceneSetResolution1280x720 (task) → SceneSetResolutionTarget → SceneEnterSettings
+    // 与多分辨率运行时无耦合: 用户已经能在任意 16:9 之外的画面跑任务（截图缩放),
+    // 该流程仅为想长期把游戏切回 1280x720 的用户提供便利
+    "SceneEnterSettings": {
+        "desc": "从任意界面进入设置的性能与画面页",
+        "pre_delay": 0,
+        "post_delay": 0,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateSettingsInGraphics",
+            "__ScenePrivateMenuListEnterSettings",
+            "[JumpBack]SceneEnterMenuList"
+        ]
+    },
+    "SceneSetResolutionTarget": {
+        "desc": "进入设置并将分辨率切换到目标分辨率",
+        "pre_delay": 0,
+        "post_delay": 0,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateSettingsResolutionSelectTarget",
+            "__ScenePrivateSettingsResolutionOpenDropdown",
+            "[JumpBack]SceneEnterSettings"
+        ]
+    },
+    "SceneSetResolution1280x720": {
+        "desc": "进入设置将分辨率切换到 1280x720",
+        "pre_delay": 0,
+        "post_delay": 0,
+        "rate_limit": 0,
+        "next": [
+            "SceneSetResolutionTarget"
+        ]
+    },
+    "__ScenePrivateMenuListEnterSettings": {
+        "desc": "从手表菜单移动到设置图标",
+        "recognition": "And",
+        "all_of": [
+            "InMenuList"
+        ],
+        "pre_delay": 0,
+        "action": "Custom",
+        "custom_action": "MpCenterTouchMove",
+        "custom_action_param": {
+            "target": [
+                -435,
+                -312,
+                15,
+                16
+            ],
+            "target_center": [
+                true,
+                true
+            ]
+        },
+        "post_delay": 400,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateMenuListEnterSettingsClick"
+        ]
+    },
+    "__ScenePrivateMenuListEnterSettingsClick": {
+        "desc": "点击手表菜单设置图标",
+        "pre_delay": 0,
+        "action": "Custom",
+        "custom_action": "MpCenterClick",
+        "custom_action_param": {
+            "target": [
+                -435,
+                -312,
+                15,
+                16
+            ],
+            "target_center": [
+                true,
+                true
+            ]
+        },
+        "post_delay": 1200,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateSettingsInGraphics",
+            "__ScenePrivateMenuListEnterSettingsRetry"
+        ]
+    },
+    "__ScenePrivateMenuListEnterSettingsRetry": {
+        "desc": "进入设置失败后返回菜单列表并重试",
+        "max_hit": 3,
+        "pre_delay": 0,
+        "action": {
+            "type": "ClickKey",
+            "param": {
+                "key": 27 // ESC
+            }
+        },
+        "post_delay": 800,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateMenuListEnterSettings"
+        ]
+    },
+    "__ScenePrivateSettingsInGraphics": {
+        "desc": "识别已进入设置的性能与画面页",
+        "recognition": "OCR",
+        "roi": [
+            0,
+            120,
+            220,
+            90
+        ],
+        "expected": [
+            "性能与画面",
+            "性能與畫面",
+            "(?i)Performance"
+        ],
+        "pre_wait_freezes": 200,
+        "pre_delay": 0,
+        "post_delay": 0,
+        "rate_limit": 0
+    },
+    "__ScenePrivateSettingsResolutionLabel": {
+        "desc": "识别设置页的分辨率设置项",
+        "recognition": "OCR",
+        "roi": [
+            42,
+            259,
+            155,
+            145
+        ],
+        "expected": [
+            "分辨率",
+            "解析度",
+            "(?i)Resolution"
+        ],
+        "pre_delay": 0,
+        "post_delay": 0,
+        "rate_limit": 0
+    },
+    "__ScenePrivateSettingsResolutionOpenDropdown": {
+        "desc": "打开分辨率下拉框",
+        "recognition": "And",
+        "all_of": [
+            "__ScenePrivateSettingsInGraphics",
+            "__ScenePrivateSettingsResolutionLabel"
+        ],
+        "box_index": 1,
+        "pre_delay": 0,
+        "action": "Click",
+        "target": [
+            -365,
+            311,
+            270,
+            39
+        ],
+        "post_delay": 500,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateSettingsResolutionSelectTarget",
+            "__ScenePrivateSettingsResolutionDropdownScrollToBottom",
+            "__ScenePrivateSettingsResolutionRestartFromDropdown"
+        ]
+    },
+    "__ScenePrivateSettingsResolutionRestartFromDropdown": {
+        "desc": "分辨率下拉框异常时关闭当前层级并重启设置跳转",
+        "pre_delay": 0,
+        "action": {
+            "type": "ClickKey",
+            "param": {
+                "key": 27 // ESC
+            }
+        },
+        "post_delay": 600,
+        "rate_limit": 0,
+        "next": [
+            "SceneSetResolutionTarget"
+        ]
+    },
+    "__ScenePrivateSettingsResolutionDropdownHasResolution": {
+        "desc": "识别分辨率下拉框内存在合法分辨率字段",
+        "recognition": "OCR",
+        "roi": [
+            -367,
+            348,
+            269,
+            231
+        ],
+        "expected": [
+            "\\d{3,4}.*\\d{3,4}"
+        ],
+        "pre_delay": 0,
+        "post_delay": 0,
+        "rate_limit": 0
+    },
+    "__ScenePrivateSettingsResolutionSelectTarget": {
+        "desc": "在分辨率下拉框中选择目标分辨率",
+        "recognition": "OCR",
+        "roi": [
+            -367,
+            348,
+            269,
+            231
+        ],
+        "expected": [
+            "1280.*720",
+            "1280×720",
+            "1280x720",
+            "1280\\*720"
+        ],
+        "pre_delay": 0,
+        "action": "Click",
+        "post_delay": 2500,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateSettingsInGraphics",
+            "__ScenePrivateSettingsResolutionRestartFromDropdown"
+        ]
+    },
+    "__ScenePrivateSettingsResolutionDropdownScrollToBottom": {
+        "desc": "分辨率下拉框持续向下滚动到低分辨率选项区域",
+        "max_hit": 12,
+        "recognition": "And",
+        "all_of": [
+            "__ScenePrivateSettingsResolutionDropdownHasResolution"
+        ],
+        "pre_delay": 0,
+        "action": "Swipe",
+        "begin": [
+            -230,
+            540,
+            1,
+            1
+        ],
+        "end": [
+            [
+                -230,
+                365,
+                1,
+                1
+            ],
+            [
+                -80,
+                365,
+                1,
+                1
+            ]
+        ],
+        "duration": [
+            350,
+            80
+        ],
+        "end_hold": [
+            0,
+            100
+        ],
+        "post_wait_freezes": 300,
+        "post_delay": 0,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateSettingsResolutionSelectTarget",
+            "__ScenePrivateSettingsResolutionDropdownScrollToBottom",
+            "__ScenePrivateSettingsResolutionDropdownScrollUp",
+            "__ScenePrivateSettingsResolutionRestartFromDropdown"
+        ]
+    },
+    "__ScenePrivateSettingsResolutionDropdownScrollUp": {
+        "desc": "分辨率下拉框向上回找目标分辨率选项",
+        "max_hit": 12,
+        "recognition": "And",
+        "all_of": [
+            "__ScenePrivateSettingsResolutionDropdownHasResolution"
+        ],
+        "pre_delay": 0,
+        "action": "Swipe",
+        "begin": [
+            -230,
+            365,
+            1,
+            1
+        ],
+        "end": [
+            [
+                -230,
+                540,
+                1,
+                1
+            ],
+            [
+                -80,
+                540,
+                1,
+                1
+            ]
+        ],
+        "duration": [
+            350,
+            80
+        ],
+        "end_hold": [
+            0,
+            100
+        ],
+        "post_wait_freezes": 300,
+        "post_delay": 0,
+        "rate_limit": 0,
+        "next": [
+            "__ScenePrivateSettingsResolutionSelectTarget",
+            "__ScenePrivateSettingsResolutionDropdownScrollUp",
+            "__ScenePrivateSettingsResolutionRestartFromDropdown"
+        ]
+    }
+}
