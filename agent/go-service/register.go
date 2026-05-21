@@ -12,6 +12,7 @@ import (
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/captureuid"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/common/attachregex"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/common/autoaltclick"
+	"github.com/MaaXYZ/MaaEnd/agent/go-service/common/centeranchor"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/common/charactercontroller"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/common/clearhitcount"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/common/expressionrecognition"
@@ -54,6 +55,7 @@ func registerAll() {
 	expressionrecognition.Register()
 	attachregex.Register()
 	autoaltclick.Register()
+	centeranchor.Register()
 	charactercontroller.Register()
 	falseaction.Register()
 	schedule.Register()

@@ -56,6 +56,8 @@
                 "MapNavigateAction",
                 "MapTrackerBigMapPick",
                 "MapTrackerMove",
+                "MpCenterClick",
+                "MpCenterTouchMove",
                 "OCREssenceInventoryNumberAction",
                 "PipelineOverride",
                 "PipelineOverrideAction",
