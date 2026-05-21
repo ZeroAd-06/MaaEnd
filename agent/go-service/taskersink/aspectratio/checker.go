@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/pkg/control"
-	"github.com/MaaXYZ/MaaEnd/agent/go-service/pkg/gamesetting"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/pkg/i18n"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/pkg/maafocus"
 	"github.com/MaaXYZ/MaaEnd/agent/go-service/pkg/pienv"
@@ -16,77 +16,54 @@ import (
 )
 
 const (
-	// Target aspect ratio: 16:9
-	targetRatio = 16.0 / 9.0
-	// Tolerance for aspect ratio comparison (±2%)
+	targetRatio  = 16.0 / 9.0
 	tolerance    = 0.02
 	targetWidth  = 1280
 	targetHeight = 720
 )
 
-// AspectRatioChecker checks if the device resolution is 16:9 before task execution
-type AspectRatioChecker struct{}
+// AspectRatioChecker configures screenshot scaling once before any pipeline
+// runs, so that pipelines designed against the 1280x720 reference work across
+// arbitrary landscape aspect ratios.
+//
+// 思路与等价于 MaaFramework 上游 #1336 的 ScreenshotTargetExpand 模式（仅限
+// 横屏场景）：用 SetScreenshot 的 LongSide / ShortSide 把短边或长边锁到参考
+// 尺寸，截图按等比缩放后，UI 元素的像素尺寸与 1280x720 设计稿一致。
+type AspectRatioChecker struct {
+	once sync.Once
+}
 
-// OnTaskerTask handles tasker task events
+// OnTaskerTask handles tasker task events.
 func (c *AspectRatioChecker) OnTaskerTask(tasker *maa.Tasker, event maa.EventStatus, detail maa.TaskerTaskDetail) {
-	// Only check on task starting
 	if event != maa.EventStatusStarting {
 		return
 	}
-
 	if detail.Entry == "MaaTaskerPostStop" {
-		// Ignore post-stop events to avoid redundant checks
-		log.Debug().Msg("Received PostStop event, skipping aspect ratio check")
+		log.Debug().Msg("Received PostStop event, skipping screenshot scaling setup")
 		return
 	}
+	c.once.Do(func() {
+		c.setupScreenshotScaling(tasker, detail)
+	})
+}
 
-	log.Debug().
-		Uint64("task_id", detail.TaskID).
-		Str("entry", detail.Entry).
-		Msg("Checking aspect ratio before task execution")
-
-	// Get controller from tasker
+func (c *AspectRatioChecker) setupScreenshotScaling(tasker *maa.Tasker, detail maa.TaskerTaskDetail) {
 	controller := tasker.GetController()
 	if controller == nil {
-		log.Error().Msg("Failed to get controller from tasker")
+		log.Error().Uint64("task_id", detail.TaskID).Msg("Failed to get controller from tasker")
 		return
 	}
 
-	const maxRetries = 20
-	var width, height int32
-	var err error
-	for i := 0; i < maxRetries; i++ {
-		width, height, err = controller.GetResolution()
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to get resolution")
-			return
-		}
-		if width > 100 && height > 100 {
-			break
-		}
-		log.Debug().
-			Int32("width", width).
-			Int32("height", height).
-			Int("attempt", i+1).
-			Msg("Resolution too small, window may not be ready yet, retrying...")
-		time.Sleep(time.Second)
-		controller.PostScreencap().Wait()
-	}
-
-	if width <= 100 || height <= 100 {
+	width, height, ok := readResolutionWithRetry(controller)
+	if !ok {
 		log.Error().
+			Uint64("task_id", detail.TaskID).
 			Int32("width", width).
 			Int32("height", height).
-			Msg("Resolution still too small after max retries, skipping aspect ratio check")
+			Msg("Resolution still too small after max retries; skipping screenshot scaling setup")
 		return
 	}
 
-	log.Debug().
-		Int32("width", width).
-		Int32("height", height).
-		Msg("Got resolution")
-
-	isADBController := false
 	controlType, controllerTypeSource, controlErr := resolveControllerType(controller)
 	controllerDisplay := displayController(pienv.ControllerName(), controlType)
 	if controlErr != nil {
@@ -98,116 +75,87 @@ func (c *AspectRatioChecker) OnTaskerTask(tasker *maa.Tasker, event maa.EventSta
 			Str("controller_type_from_pi", pienv.ControllerType()).
 			Int32("width", width).
 			Int32("height", height).
-			Msg("Failed to detect controller type, falling back to aspect ratio check")
-	} else {
-		isADBController = controlType == control.CONTROL_TYPE_ADB
-		log.Debug().
+			Msg("Failed to detect controller type")
+	}
+
+	if width <= height {
+		log.Error().
 			Uint64("task_id", detail.TaskID).
 			Str("entry", detail.Entry).
-			Str("controller_name", pienv.ControllerName()).
 			Str("controller_type", controlType).
 			Str("controller_type_source", controllerTypeSource).
-			Bool("is_adb_controller", isADBController).
 			Int32("width", width).
 			Int32("height", height).
-			Msg("Detected controller type for aspect ratio check")
+			Msg("Portrait resolution not supported; stopping task")
+		c.stopWithWarning(tasker, controllerDisplay, int(width), int(height),
+			i18n.T("tasker.aspect_ratio_warning.portrait_unsupported"))
+		return
 	}
 
-	if isADBController {
-		requirement := i18n.T("tasker.aspect_ratio_warning.requirement_exact", targetWidth, targetHeight)
+	opt, mode := chooseScreenshotOption(int(width), int(height))
+	if err := controller.SetScreenshot(opt); err != nil {
+		log.Error().
+			Err(err).
+			Uint64("task_id", detail.TaskID).
+			Str("mode", mode).
+			Int32("width", width).
+			Int32("height", height).
+			Msg("Failed to apply screenshot scaling")
+		c.stopWithWarning(tasker, controllerDisplay, int(width), int(height),
+			i18n.T("tasker.aspect_ratio_warning.scaling_failed"))
+		return
+	}
+
+	log.Info().
+		Uint64("task_id", detail.TaskID).
+		Str("entry", detail.Entry).
+		Str("controller_name", pienv.ControllerName()).
+		Str("controller_type", controlType).
+		Str("controller_type_source", controllerTypeSource).
+		Int32("width", width).
+		Int32("height", height).
+		Str("mode", mode).
+		Msg("Configured screenshot scaling")
+}
+
+// chooseScreenshotOption picks a screenshot-scaling option that makes the
+// 1280x720 reference layout work for any landscape aspect ratio.
+//
+// Caller must ensure width > height (landscape).
+func chooseScreenshotOption(width, height int) (maa.ScreenshotOption, string) {
+	ratio := float64(width) / float64(height)
+	switch {
+	case math.Abs(ratio-targetRatio) <= targetRatio*tolerance:
+		return maa.WithScreenshotTargetLongSide(targetWidth), "16:9"
+	case ratio > targetRatio:
+		return maa.WithScreenshotTargetShortSide(targetHeight), "wider_than_16x9"
+	default:
+		return maa.WithScreenshotTargetLongSide(targetWidth), "narrower_than_16x9"
+	}
+}
+
+func readResolutionWithRetry(controller *maa.Controller) (int32, int32, bool) {
+	const maxRetries = 20
+	var width, height int32
+	var err error
+	for i := range maxRetries {
+		width, height, err = controller.GetResolution()
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get resolution")
+			return width, height, false
+		}
+		if width > 100 && height > 100 {
+			return width, height, true
+		}
 		log.Debug().
-			Uint64("task_id", detail.TaskID).
-			Str("entry", detail.Entry).
-			Str("controller_name", pienv.ControllerName()).
-			Str("controller_type", controlType).
-			Str("requirement", "exact_resolution").
-			Str("target_resolution", requirement).
-			Str("mode", "adb_exact_resolution").
 			Int32("width", width).
 			Int32("height", height).
-			Int("target_width", targetWidth).
-			Int("target_height", targetHeight).
-			Msg("Using exact resolution check for ADB controller")
-
-		if int(width) == targetWidth && int(height) == targetHeight {
-			log.Debug().
-				Uint64("task_id", detail.TaskID).
-				Str("entry", detail.Entry).
-				Str("controller_name", pienv.ControllerName()).
-				Str("controller_type", controlType).
-				Str("requirement", "exact_resolution").
-				Str("target_resolution", requirement).
-				Int32("width", width).
-				Int32("height", height).
-				Str("mode", "adb_exact_resolution").
-				Msg("resolution check passed")
-			return
-		}
-
-		log.Error().
-			Uint64("task_id", detail.TaskID).
-			Str("entry", detail.Entry).
-			Str("controller_name", pienv.ControllerName()).
-			Str("controller_type", controlType).
-			Str("requirement", "exact_resolution").
-			Str("target_resolution", requirement).
-			Bool("stop_task", true).
-			Int32("width", width).
-			Int32("height", height).
-			Int("target_width", targetWidth).
-			Int("target_height", targetHeight).
-			Str("mode", "adb_exact_resolution").
-			Msg("resolution check failed")
-		c.stopWithWarning(tasker, controllerDisplay, int(width), int(height), requirement)
-		return
+			Int("attempt", i+1).
+			Msg("Resolution too small, window may not be ready yet, retrying...")
+		time.Sleep(time.Second)
+		controller.PostScreencap().Wait()
 	}
-
-	log.Debug().
-		Uint64("task_id", detail.TaskID).
-		Str("entry", detail.Entry).
-		Str("controller_name", pienv.ControllerName()).
-		Str("controller_type", controlType).
-		Str("requirement", "aspect_ratio").
-		Str("mode", "aspect_ratio_only").
-		Int32("width", width).
-		Int32("height", height).
-		Float64("target_ratio", targetRatio).
-		Msg("Using aspect ratio check for non-ADB controller")
-
-	if !isAspectRatio16x9(int(width), int(height)) {
-		actualRatio := calculateAspectRatio(int(width), int(height))
-		log.Error().
-			Uint64("task_id", detail.TaskID).
-			Str("entry", detail.Entry).
-			Str("controller_name", pienv.ControllerName()).
-			Str("controller_type", controlType).
-			Str("requirement", "aspect_ratio").
-			Bool("stop_task", true).
-			Int32("width", width).
-			Int32("height", height).
-			Float64("actual_ratio", actualRatio).
-			Float64("target_ratio", targetRatio).
-			Str("mode", "aspect_ratio_only").
-			Msg("resolution check failed")
-		fullScreen, _ := gamesetting.GetVideoFullScreen()
-		if fullScreen == 1 {
-			c.stopWithWarning(tasker, controllerDisplay, int(width), int(height), i18n.T("tasker.aspect_ratio_warning.full_screen_illegal"))
-		} else {
-			c.stopWithWarning(tasker, controllerDisplay, int(width), int(height), i18n.T("tasker.aspect_ratio_warning.requirement_ratio"))
-		}
-		return
-	}
-
-	log.Debug().
-		Uint64("task_id", detail.TaskID).
-		Str("entry", detail.Entry).
-		Str("controller_name", pienv.ControllerName()).
-		Str("controller_type", controlType).
-		Str("requirement", "aspect_ratio").
-		Int32("width", width).
-		Int32("height", height).
-		Str("mode", "aspect_ratio_only").
-		Msg("resolution check passed")
+	return width, height, false
 }
 
 func (c *AspectRatioChecker) stopWithWarning(tasker *maa.Tasker, controllerDisplay string, width, height int, followUpLines ...string) {
@@ -225,37 +173,10 @@ func resolveControllerType(controller *maa.Controller) (string, string, error) {
 	if err != nil {
 		return "unknown", "controller_info", err
 	}
-
 	if normalized := normalizeControllerType(controlType); normalized != "" {
 		return normalized, "controller_info", nil
 	}
 	return "unknown", "controller_info", nil
-}
-
-// isAspectRatio16x9 checks if the given dimensions are approximately 16:9
-// This handles both landscape (16:9) and portrait (9:16) orientations
-func isAspectRatio16x9(width, height int) bool {
-	if width <= 0 || height <= 0 {
-		return false
-	}
-
-	ratio := calculateAspectRatio(width, height)
-
-	// Check if ratio is within tolerance of 16:9
-	return math.Abs(ratio-targetRatio) <= targetRatio*tolerance
-}
-
-// calculateAspectRatio calculates the aspect ratio, always returning the larger/smaller ratio
-// This normalizes both landscape and portrait orientations
-func calculateAspectRatio(width, height int) float64 {
-	w := float64(width)
-	h := float64(height)
-
-	// Always return wider/narrower to normalize orientation
-	if w > h {
-		return w / h
-	}
-	return h / w
 }
 
 func buildWarningData(controllerDisplay string, width, height int, followUpLines ...string) map[string]any {
