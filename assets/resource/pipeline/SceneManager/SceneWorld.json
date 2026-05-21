@@ -26,7 +26,7 @@
         "desc": "大世界剧情跳过",
         "recognition": "TemplateMatch",
         "roi": [
-            1140,
+            -140,
             0,
             120,
             90

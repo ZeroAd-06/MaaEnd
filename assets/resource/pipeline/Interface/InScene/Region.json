@@ -242,17 +242,24 @@
     },
     "InMenuList": {
         "desc": "在菜单列表界面",
-        "recognition": "OCR",
-        "roi": [
-            420,
-            -100,
-            450,
-            100
-        ],
-        "expected": [
-            "FIELD",
-            "ENDFIELD"
-        ]
+        "recognition": "Custom",
+        "custom_recognition": "MpCenterOCR",
+        "custom_recognition_param": {
+            "roi": [
+                -220,
+                260,
+                450,
+                100
+            ],
+            "roi_center": [
+                true,
+                true
+            ],
+            "expected": [
+                "FIELD",
+                "ENDFIELD"
+            ]
+        }
     },
     "InNoticeRewards": {
         "desc": "在奖励领取界面",

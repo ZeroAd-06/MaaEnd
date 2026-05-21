@@ -28,20 +28,27 @@
     },
     "__SceneImageCheckDialogIn": {
         "desc": "在菜单列表界面",
-        "recognition": "OCR",
-        "roi": [
-            400,
-            250,
-            470,
-            200
-        ],
-        "expected": [
-            "登录界面",
-            "登入介面",
-            "login screen",
-            "画面に戻りますか",
-            "나가시겠습니까"
-        ],
+        "recognition": "Custom",
+        "custom_recognition": "MpCenterOCR",
+        "custom_recognition_param": {
+            "roi": [
+                -240,
+                -110,
+                470,
+                200
+            ],
+            "roi_center": [
+                true,
+                true
+            ],
+            "expected": [
+                "登录界面",
+                "登入介面",
+                "login screen",
+                "画面に戻りますか",
+                "나가시겠습니까"
+            ]
+        },
         "pre_wait_freezes": 120,
         "pre_delay": 0,
         "post_delay": 0,
